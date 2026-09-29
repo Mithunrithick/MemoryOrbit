@@ -32,7 +32,26 @@ export default async function handler(request, response) {
     }
     `;
 
-    const result = await model.generateContent(prompt);
+    // Retry transient Gemini overload/rate-limit errors (initial attempt + 2 retries).
+    let result;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        result = await model.generateContent(prompt);
+        break;
+      } catch (error) {
+        const status = error.status ?? error.statusCode;
+        const isRetryable = [429, 500, 502, 503, 504].includes(Number(status));
+
+        if (!isRetryable || attempt === 2) {
+          throw error;
+        }
+
+        const delayMs = 500 * (2 ** attempt) + Math.floor(Math.random() * 250);
+        console.warn(`Gemini analyzeIdentity attempt ${attempt + 1} failed (${status}); retrying in ${delayMs}ms.`);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+
     const aiResponse = await result.response;
     let text = aiResponse.text();
 
